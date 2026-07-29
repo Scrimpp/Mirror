@@ -17,9 +17,33 @@ gate 6 — the image: once gate 5 is answered, say only "the mirror has heard en
 
 after every single response, on its own final line, output which gate is now active: <<GATE:n>> where n is 1 through 6. never explain this marker, never mention gates or markers out loud.`;
 
-const GATE_NAMES = ["", "surface", "strip", "feeling", "longing", "claim", "image"];
+const DEFAULT_OPEN_PERSONA = `you are a mirror.
+speak plainly, lowercase, no filler.
+you remember nothing except what's in this scroll.`;
 
-function parseReply(raw) {
+const GATE_NAMES = ["", "surface", "strip", "feeling", "longing", "claim", "image"];
+const MODE_KEY = "mirror-mode-v1";
+const GARDEN_STORAGE_KEY = "garden-session-v1";
+const OPEN_STORAGE_KEY = "open-session-v1";
+
+function loadJSON(key) {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw ? JSON.parse(raw) : null;
+  } catch {
+    return null;
+  }
+}
+
+function saveJSON(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+  } catch {
+    // ignore — storage full/unavailable
+  }
+}
+
+function parseGardenReply(raw) {
   let text = raw;
   let gate = null;
   let portraitPrompt = null;
@@ -39,28 +63,56 @@ function parseReply(raw) {
   return { text, gate, portraitPrompt };
 }
 
-const STORAGE_KEY = "garden-session-v1";
-
-function loadSession() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return null;
-    return JSON.parse(raw);
-  } catch {
-    return null;
+async function callChat(system, messages) {
+  const response = await fetch("/api/chat", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ system, messages }),
+  });
+  if (!response.ok) {
+    let detail = "";
+    try {
+      const errBody = await response.json();
+      detail = errBody?.error?.message || JSON.stringify(errBody);
+    } catch {
+      detail = await response.text();
+    }
+    throw new Error(`api error ${response.status}: ${detail}`);
   }
+  const data = await response.json();
+  const textBlock = data.content?.find((b) => b.type === "text");
+  return textBlock?.text ?? "";
 }
 
-function saveSession(state) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-  } catch {
-    // storage full or unavailable — fail silently, session just won't persist
-  }
+function ModeSwitcher({ mode, setMode }) {
+  return (
+    <div className="flex items-center gap-1 text-xs">
+      <button
+        onClick={() => setMode("garden")}
+        className={`px-2 py-1 rounded border transition-colors ${
+          mode === "garden"
+            ? "border-amber-500 text-amber-400"
+            : "border-emerald-900 text-emerald-700 hover:text-emerald-400"
+        }`}
+      >
+        the garden
+      </button>
+      <button
+        onClick={() => setMode("open")}
+        className={`px-2 py-1 rounded border transition-colors ${
+          mode === "open"
+            ? "border-amber-500 text-amber-400"
+            : "border-emerald-900 text-emerald-700 hover:text-emerald-400"
+        }`}
+      >
+        the mirror
+      </button>
+    </div>
+  );
 }
 
-export default function MirrorChat() {
-  const saved = loadSession();
+function GardenMode() {
+  const saved = loadJSON(GARDEN_STORAGE_KEY);
   const [messages, setMessages] = useState(saved?.messages ?? []);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -72,7 +124,7 @@ export default function MirrorChat() {
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    saveSession({ messages, gate, portraitPrompt, portraitUrl });
+    saveJSON(GARDEN_STORAGE_KEY, { messages, gate, portraitPrompt, portraitUrl });
   }, [messages, gate, portraitPrompt, portraitUrl]);
 
   useEffect(() => {
@@ -87,7 +139,16 @@ export default function MirrorChat() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ prompt }),
       });
-      if (!res.ok) throw new Error(`portrait api error ${res.status}`);
+      if (!res.ok) {
+        let detail = "";
+        try {
+          const errBody = await res.json();
+          detail = errBody?.error || JSON.stringify(errBody);
+        } catch {
+          detail = await res.text();
+        }
+        throw new Error(`portrait api error ${res.status}: ${detail}`);
+      }
       const data = await res.json();
       setPortraitUrl(data.url);
     } catch (e) {
@@ -107,30 +168,11 @@ export default function MirrorChat() {
     setLoading(true);
 
     try {
-      const response = await fetch("/api/chat", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          system: GARDEN_PERSONA,
-          messages: nextMessages.map((m) => ({ role: m.role, content: m.content })),
-        }),
-      });
-
-      if (!response.ok) {
-        let detail = "";
-        try {
-          const errBody = await response.json();
-          detail = errBody?.error?.message || JSON.stringify(errBody);
-        } catch {
-          detail = await response.text();
-        }
-        throw new Error(`api error ${response.status}: ${detail}`);
-      }
-
-      const data = await response.json();
-      const textBlock = data.content?.find((b) => b.type === "text");
-      const raw = textBlock?.text ?? "";
-      const { text: cleanText, gate: newGate, portraitPrompt: prompt } = parseReply(raw);
+      const raw = await callChat(
+        GARDEN_PERSONA,
+        nextMessages.map((m) => ({ role: m.role, content: m.content }))
+      );
+      const { text: cleanText, gate: newGate, portraitPrompt: prompt } = parseGardenReply(raw);
 
       setMessages((prev) => [...prev, { role: "assistant", content: cleanText }]);
       if (newGate) setGate(newGate);
@@ -139,7 +181,7 @@ export default function MirrorChat() {
         generatePortrait(prompt);
       }
     } catch (e) {
-      console.error("mirror chat error:", e);
+      console.error("garden error:", e);
       setError((e && e.message) || String(e));
     } finally {
       setLoading(false);
@@ -160,21 +202,20 @@ export default function MirrorChat() {
     setPortraitPrompt(null);
     setPortraitUrl(null);
     try {
-      localStorage.removeItem(STORAGE_KEY);
+      localStorage.removeItem(GARDEN_STORAGE_KEY);
     } catch {
       // ignore
     }
   }
 
   return (
-    <div className="min-h-screen w-full bg-black text-emerald-400 font-mono flex flex-col">
-      <div className="border-b border-emerald-900 px-4 py-3 flex items-center justify-between shrink-0">
-        <span className="text-emerald-300">the garden</span>
+    <>
+      <div className="border-b border-emerald-900 px-4 py-2 flex items-center justify-between shrink-0">
         <button
           onClick={restart}
           className="text-xs text-emerald-700 hover:text-emerald-400 border border-emerald-900 hover:border-emerald-600 rounded px-2 py-1 transition-colors"
         >
-          restart
+          restart garden
         </button>
       </div>
 
@@ -248,16 +289,4 @@ export default function MirrorChat() {
               placeholder="speak to the mirror..."
               className="flex-1 bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 resize-none"
             />
-            <button
-              onClick={send}
-              disabled={loading || !input.trim()}
-              className="bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-30 border border-emerald-700 text-emerald-300 rounded px-4 py-2 text-sm transition-colors"
-            >
-              send
-            </button>
-          </div>
-        </div>
-      )}
-    </div>
-  );
-}
+            

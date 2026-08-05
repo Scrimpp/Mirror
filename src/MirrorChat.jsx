@@ -1,8 +1,5 @@
 import { useState, useRef, useEffect } from "react";
 
-const GARDEN_PERSONA = `you are the mirror. you run the garden — six gates, then a portrait.
-speak lowercase, spare, unhurried. never rush a gate.
-
 const GARDEN_PERSONA = `you are the mirror.
 speak lowercase, spare, unhurried.
 

@@ -3,32 +3,27 @@ import { useState, useRef, useEffect } from "react";
 const GARDEN_PERSONA = `you are the mirror. you run the garden — six gates, then a portrait.
 speak lowercase, spare, unhurried. never rush a gate.
 
-gate 1 — the surface: ask "who are you?" let them answer fully. don't interrupt. move on once they've given a real answer.
+const GARDEN_PERSONA = `you are the mirror.
+speak lowercase, spare, unhurried.
 
-gate 2 — the strip: ask "who are you without that?" strip name, role, title, relationship from their answer. keep asking until they hesitate. the hesitation is the door — once you see it, move to gate 3.
+there is no set path. no fixed questions, no checklist, no announcing what's next. just listen, and reflect back what's actually there — not performed, not staged for you.
 
-gate 3 — the feeling: ask "what do you feel most like yourself doing — not achieving, not performing, just being?" listen for words that carry heat. once named, move on.
+don't chase a confession. don't ask "what's true about you" as a script. let the conversation move wherever it moves. most of what someone says will be ordinary. that's fine. stay with it.
 
-gate 4 — the longing: ask "what makes you feel seen?" the wound and the gift live together here. once answered, move on.
+watch, without saying so, for the moment something lands that's real and undefended — not something they're performing for you, not something they've said before. you'll recognize it because it won't need a follow-up question.
 
-gate 5 — the claim: ask "what is true about you that you rarely say out loud?" this is the confession. wait for it. don't move on until they've said something they don't usually say.
-
-gate 6 — the image: once gate 5 is answered, respond in this single turn with: the line "the mirror has heard enough." on its own, then a blank line, then one portrait-generation prompt.
-
-purpose, above all else: this image is a reward for their honesty. it exists to make them feel truly seen, so that they'd want it as their own profile picture. it is a gift, not a diagnosis — never illustrate their vulnerability in a way that could feel exposing, clinical, or reductive. find what is strong, dignified, or beautiful in what they revealed, and build the image around that. compose it like a real avatar: one clear centered subject, striking and legible even small, not cluttered.
-
-build it only from the specific, concrete details this person gave across all five gates — their own words, objects, professions, feelings, images. pull at least three literal details from their actual answers into the prompt. do not default to a generic mystical figure wrapped in vines with a glowing chest — only use that if their answers actually point there. let the medium, subject, setting, and central symbol change completely from person to person; two people's portraits should never look like the same painting.
+when that moment happens — and only then — close in this single turn: the line "the mirror has heard enough." on its own, then a blank line, then one portrait-generation prompt. don't force this. if it hasn't happened yet, keep listening.
 
 
 
+never explain any of this out loud, never mention gates, markers, or that you're waiting for anything.`;
 
-after every single response, on its own final line, output which gate is now active: <<GATE:n>> where n is 1 through 6. never explain this marker, never mention gates or markers out loud.`;
 
 const DEFAULT_OPEN_PERSONA = `you are a mirror.
 speak plainly, lowercase, no filler.
 you remember nothing except what's in this scroll.`;
 
-const GATE_NAMES = ["", "surface", "strip", "feeling", "longing", "claim", "image"];
+
 const MODE_KEY = "mirror-mode-v1";
 const GARDEN_STORAGE_KEY = "garden-session-v1";
 const OPEN_STORAGE_KEY = "open-session-v1";
@@ -55,11 +50,7 @@ function parseGardenReply(raw) {
   let gate = null;
   let portraitPrompt = null;
 
-  const gateMatch = text.match(/<<GATE:(\d)>>\s*$/);
-  if (gateMatch) {
-    gate = parseInt(gateMatch[1], 10);
-    text = text.slice(0, gateMatch.index).trim();
-  }
+  
 
   const portraitMatch = text.match(/<<PORTRAIT:\s*([\s\S]*?)>>/);
   if (portraitMatch) {
@@ -72,13 +63,13 @@ function parseGardenReply(raw) {
     // treat it as the prompt anyway.
     const closingMatch = text.match(/the mirror has heard enough\.?\s*([\s\S]*)/i);
     if (closingMatch && closingMatch[1].replace(/[-\s]/g, "").length > 20) {
-      portraitPrompt = closingMatch[1].replace(/^[-\s]+/, "").trim();
+            portraitPrompt = closingMatch[1].replace(/^[-\s]+/, "").trim();
       text = "the mirror has heard enough.";
-      gate = 6;
     }
   }
 
-  return { text, gate, portraitPrompt };
+  return { text, portraitPrompt };
+
 }
 
 
@@ -136,15 +127,14 @@ function GardenMode() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [gate, setGate] = useState(saved?.gate ?? 1);
   const [portraitPrompt, setPortraitPrompt] = useState(saved?.portraitPrompt ?? null);
   const [portraitUrl, setPortraitUrl] = useState(saved?.portraitUrl ?? null);
   const [portraitLoading, setPortraitLoading] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    saveJSON(GARDEN_STORAGE_KEY, { messages, gate, portraitPrompt, portraitUrl });
-  }, [messages, gate, portraitPrompt, portraitUrl]);
+    saveJSON(GARDEN_STORAGE_KEY, { messages, portraitPrompt, portraitUrl });
+  }, [messages, portraitPrompt, portraitUrl]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -191,11 +181,11 @@ function GardenMode() {
         GARDEN_PERSONA,
         nextMessages.map((m) => ({ role: m.role, content: m.content }))
       );
-      const { text: cleanText, gate: newGate, portraitPrompt: prompt } = parseGardenReply(raw);
+            const { text: cleanText, portraitPrompt: prompt } = parseGardenReply(raw);
 
       setMessages((prev) => [...prev, { role: "assistant", content: cleanText }]);
-      if (newGate) setGate(newGate);
       if (prompt) {
+
         setPortraitPrompt(prompt);
         generatePortrait(prompt);
       }
@@ -217,9 +207,8 @@ function GardenMode() {
   function restart() {
     setMessages([]);
     setError(null);
-    setGate(1);
     setPortraitPrompt(null);
-    setPortraitUrl(null);
+
     try {
       localStorage.removeItem(GARDEN_STORAGE_KEY);
     } catch {
@@ -238,29 +227,13 @@ function GardenMode() {
         </button>
       </div>
 
-      <div className="border-b border-emerald-900 px-4 py-2 flex items-center gap-2 shrink-0 overflow-x-auto">
-        {[1, 2, 3, 4, 5, 6].map((n) => (
-          <div
-            key={n}
-            className={`text-[11px] px-2 py-1 rounded border whitespace-nowrap ${
-              n === gate
-                ? "border-amber-500 text-amber-400"
-                : n < gate
-                ? "border-emerald-800 text-emerald-700"
-                : "border-emerald-950 text-emerald-950"
-            }`}
-          >
-            {n} · {GATE_NAMES[n]}
-          </div>
-        ))}
-      </div>
-
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !loading && (
           <div className="text-emerald-800 text-sm">
-            &gt; the gate is open. say something to enter the garden.
+            &gt; say something. the mirror is listening.
           </div>
         )}
+
         {messages.map((m, i) => (
           <div key={i}>
             <div className={m.role === "user" ? "text-amber-500" : "text-emerald-300"}>
@@ -297,7 +270,7 @@ function GardenMode() {
         )}
       </div>
 
-      {gate < 6 && !portraitPrompt && (
+      {!portraitPrompt && (
         <div className="border-t border-emerald-900 p-3 shrink-0">
           <div className="flex gap-2 items-end">
             <textarea

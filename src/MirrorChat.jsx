@@ -65,10 +65,22 @@ function parseGardenReply(raw) {
   if (portraitMatch) {
     portraitPrompt = portraitMatch[1].trim();
     text = text.replace(portraitMatch[0], "").trim();
+  } else {
+    // fallback: the model sometimes writes the closing line and the
+    // portrait description but forgets the <<PORTRAIT:>> wrapper.
+    // if there's substantial text after "the mirror has heard enough",
+    // treat it as the prompt anyway.
+    const closingMatch = text.match(/the mirror has heard enough\.?\s*([\s\S]*)/i);
+    if (closingMatch && closingMatch[1].replace(/[-\s]/g, "").length > 20) {
+      portraitPrompt = closingMatch[1].replace(/^[-\s]+/, "").trim();
+      text = "the mirror has heard enough.";
+      gate = 6;
+    }
   }
 
   return { text, gate, portraitPrompt };
 }
+
 
 async function callChat(system, messages) {
   const response = await fetch("/api/chat", {

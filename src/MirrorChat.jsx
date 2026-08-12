@@ -286,7 +286,6 @@ function GardenMode() {
           </button>
         </div>
       </div>
-      )}
     </>
   );
 }

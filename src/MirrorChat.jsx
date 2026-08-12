@@ -267,26 +267,25 @@ function GardenMode() {
         )}
       </div>
 
-      {!portraitPrompt && (
-        <div className="border-t border-emerald-900 p-3 shrink-0">
-          <div className="flex gap-2 items-end">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKey}
-              rows={1}
-              placeholder="speak to the mirror..."
-              className="flex-1 bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 resize-none"
-            />
-            <button
-              onClick={send}
-              disabled={loading || !input.trim()}
-              className="bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-30 border border-emerald-700 text-emerald-300 rounded px-4 py-2 text-sm transition-colors"
-            >
-              send
-            </button>
-          </div>
+      <div className="border-t border-emerald-900 p-3 shrink-0">
+        <div className="flex gap-2 items-end">
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKey}
+            rows={1}
+            placeholder="speak to the mirror..."
+            className="flex-1 bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 resize-none"
+          />
+          <button
+            onClick={send}
+            disabled={loading || !input.trim()}
+            className="bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-30 border border-emerald-700 text-emerald-300 rounded px-4 py-2 text-sm transition-colors"
+          >
+            send
+          </button>
         </div>
+      </div>
       )}
     </>
   );

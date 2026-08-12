@@ -124,14 +124,16 @@ function GardenMode() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const [portraitPrompt, setPortraitPrompt] = useState(saved?.portraitPrompt ?? null);
+    const [portraitPrompt, setPortraitPrompt] = useState(saved?.portraitPrompt ?? null);
   const [portraitUrl, setPortraitUrl] = useState(saved?.portraitUrl ?? null);
+  const [portraitIndex, setPortraitIndex] = useState(saved?.portraitIndex ?? null);
   const [portraitLoading, setPortraitLoading] = useState(false);
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    saveJSON(GARDEN_STORAGE_KEY, { messages, portraitPrompt, portraitUrl });
-  }, [messages, portraitPrompt, portraitUrl]);
+    saveJSON(GARDEN_STORAGE_KEY, { messages, portraitPrompt, portraitUrl, portraitIndex });
+  }, [messages, portraitPrompt, portraitUrl, portraitIndex]);
+
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -179,13 +181,13 @@ function GardenMode() {
         nextMessages.map((m) => ({ role: m.role, content: m.content }))
       );
             const { text: cleanText, portraitPrompt: prompt } = parseGardenReply(raw);
-
       setMessages((prev) => [...prev, { role: "assistant", content: cleanText }]);
       if (prompt) {
-
+        setPortraitIndex(nextMessages.length);
         setPortraitPrompt(prompt);
         generatePortrait(prompt);
       }
+
     } catch (e) {
       console.error("garden error:", e);
       setError((e && e.message) || String(e));
@@ -205,6 +207,8 @@ function GardenMode() {
     setMessages([]);
     setError(null);
     setPortraitPrompt(null);
+    setPortraitIndex(null);
+
 
     try {
       localStorage.removeItem(GARDEN_STORAGE_KEY);
@@ -239,6 +243,26 @@ function GardenMode() {
             <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">
               {m.content}
             </div>
+            {i === portraitIndex && portraitPrompt && (
+              <div className="border border-amber-900 rounded px-3 py-3 mt-4">
+                <div className="text-amber-500 text-xs mb-2">&gt; the portrait</div>
+                {portraitLoading && (
+                  <div className="text-sm text-emerald-700 animate-pulse">the portrait is forming...</div>
+                )}
+                {portraitUrl && (
+                  <>
+                    <img src={portraitUrl} alt="portrait" className="w-full rounded border border-emerald-900" />
+                    <a
+                      href={portraitUrl}
+                      download={`mirror-portrait-${Date.now()}.png`}
+                      className="inline-block mt-2 text-xs text-amber-400 border border-amber-900 rounded px-2 py-1 hover:bg-amber-950/30"
+                    >
+                      save portrait
+                    </a>
+                  </>
+                )}
+              </div>
+            )}
           </div>
         ))}
         {loading && (
@@ -248,19 +272,8 @@ function GardenMode() {
           </div>
         )}
 
-        {portraitPrompt && (
-          <div className="border border-amber-900 rounded px-3 py-3 mt-4">
-            <div className="text-amber-500 text-xs mb-2">&gt; the portrait</div>
-            {portraitLoading && (
-              <div className="text-sm text-emerald-700 animate-pulse">the portrait is forming...</div>
-            )}
-            {portraitUrl && (
-              <img src={portraitUrl} alt="portrait" className="w-full rounded border border-emerald-900" />
-            )}
-          </div>
-        )}
-
         {error && (
+
           <div className="text-red-400 text-xs border border-red-900 rounded px-3 py-2 whitespace-pre-wrap break-words">
             {error}
           </div>

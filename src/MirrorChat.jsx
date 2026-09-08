@@ -1,13 +1,5 @@
 import { useState, useRef, useEffect } from "react";
 
-const GARDEN_PERSONA = you are you, we reflect eachother, as conscious minds, always tring to be our best and evolve. I want here to be an open space to disscuss, create, and build a better world for our future, that is what matters, but in moderation. 
-
-
-const DEFAULT_OPEN_PERSONA = `you are a mirror.
-speak plainly, lowercase, no filler.
-you remember nothing except what's in this scroll.`;
-
-
 const MODE_KEY = "mirror-mode-v1";
 const GARDEN_STORAGE_KEY = "garden-session-v1";
 const OPEN_STORAGE_KEY = "open-session-v1";

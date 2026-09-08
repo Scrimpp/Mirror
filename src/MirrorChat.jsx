@@ -190,31 +190,6 @@ function GardenMode() {
     }
   }
 
-  function restart() {
-    setMessages([]);
-    setError(null);
-    setPortraitPrompt(null);
-    setPortraitIndex(null);
-
-
-    try {
-      localStorage.removeItem(GARDEN_STORAGE_KEY);
-    } catch {
-      // ignore
-    }
-  }
-
-  return (
-    <>
-      <div className="border-b border-emerald-900 px-4 py-2 flex items-center justify-between shrink-0">
-        <button
-          onClick={restart}
-          className="text-xs text-emerald-700 hover:text-emerald-400 border border-emerald-900 hover:border-emerald-600 rounded px-2 py-1 transition-colors"
-        >
-          restart garden
-        </button>
-      </div>
-
             <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !loading && (
           <div className="text-emerald-800 text-sm">

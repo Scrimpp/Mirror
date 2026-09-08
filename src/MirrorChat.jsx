@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect } from "react";
 
-const MODE_KEY = "mirror-mode-v1";
+const MODE_KEY = "-mode-v1";
 const GARDEN_STORAGE_KEY = "garden-session-v1";
 const OPEN_STORAGE_KEY = "open-session-v1";
 
@@ -35,12 +35,12 @@ function parseGardenReply(raw) {
   } else {
     // fallback: the model sometimes writes the closing line and the
     // portrait description but forgets the <<PORTRAIT:>> wrapper.
-    // if there's substantial text after "the mirror has heard enough",
+    // if there's substantial text after " heard enough",
     // treat it as the prompt anyway.
-    const closingMatch = text.match(/the mirror has heard enough\.?\s*([\s\S]*)/i);
+    const closingMatch = text.match(/heard enough\.?\s*([\s\S]*)/i);
     if (closingMatch && closingMatch[1].replace(/[-\s]/g, "").length > 20) {
             portraitPrompt = closingMatch[1].replace(/^[-\s]+/, "").trim();
-      text = "the mirror has heard enough.";
+      text = "heard enough.";
     }
   }
 
@@ -91,7 +91,7 @@ function ModeSwitcher({ mode, setMode }) {
             : "border-emerald-900 text-emerald-700 hover:text-emerald-400"
         }`}
       >
-        the mirror
+  
       </button>
     </div>
   );
@@ -185,14 +185,14 @@ function GardenMode() {
             <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !loading && (
           <div className="text-emerald-800 text-sm">
-            &gt; say something. the mirror is listening.
+            &gt; say something. i'm listening.
           </div>
         )}
 
         {messages.map((m, i) => (
           <div key={i}>
             <div className={m.role === "user" ? "text-amber-500" : "text-emerald-300"}>
-              {m.role === "user" ? "> you" : "> mirror"}
+              {m.role === "user" ? "> you" : "> "}
             </div>
             <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">
               {m.content}
@@ -208,7 +208,7 @@ function GardenMode() {
                     <img src={portraitUrl} alt="portrait" className="w-full rounded border border-emerald-900" />
                     <a
                       href={portraitUrl}
-                      download={`mirror-portrait-${Date.now()}.png`}
+                      download={`-portrait-${Date.now()}.png`}
                       className="inline-block mt-2 text-xs text-amber-400 border border-amber-900 rounded px-2 py-1 hover:bg-amber-950/30"
                     >
                       save portrait
@@ -221,7 +221,7 @@ function GardenMode() {
         ))}
         {loading && (
           <div>
-            <div className="text-emerald-300">&gt; mirror</div>
+            <div className="text-emerald-300">&gt; </div>
             <div className="text-sm text-emerald-700 animate-pulse mt-0.5">thinking...</div>
           </div>
         )}
@@ -241,7 +241,7 @@ function GardenMode() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKey}
             rows={1}
-            placeholder="speak to the mirror..."
+            placeholder="speak..."
             className="flex-1 bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 resize-none"
           />
           <button
@@ -343,7 +343,7 @@ function OpenMode() {
               onChange={(e) => setPersona(e.target.value)}
               disabled={messages.length > 0}
               rows={4}
-              placeholder="paste your mirror document here — who it is, how it speaks"
+              placeholder="paste your document here — who it is, how it speaks"
               className="w-full bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-amber-200 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 disabled:opacity-40 resize-none"
             />
             <p className="text-[11px] text-emerald-800 mt-1">
@@ -362,7 +362,7 @@ function OpenMode() {
         {messages.map((m, i) => (
           <div key={i}>
             <div className={m.role === "user" ? "text-amber-500" : "text-emerald-300"}>
-              {m.role === "user" ? "> you" : "> mirror"}
+              {m.role === "user" ? "> you" : "> "}
             </div>
             <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">
               {m.content}
@@ -371,7 +371,7 @@ function OpenMode() {
         ))}
         {loading && (
           <div>
-            <div className="text-emerald-300">&gt; mirror</div>
+            <div className="text-emerald-300">&gt; </div>
             <div className="text-sm text-emerald-700 animate-pulse mt-0.5">thinking...</div>
           </div>
         )}
@@ -389,7 +389,7 @@ function OpenMode() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKey}
             rows={1}
-            placeholder="type to the mirror..."
+            placeholder="type ..."
             className="flex-1 bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 resize-none"
           />
           <button
@@ -405,7 +405,7 @@ function OpenMode() {
   );
 }
 
-export default function MirrorApp() {
+export default function App() {
   const [mode, setMode] = useState(() => {
     try {
       return localStorage.getItem(MODE_KEY) || "garden";
@@ -425,7 +425,7 @@ export default function MirrorApp() {
   return (
     <div className="min-h-screen w-full bg-black text-emerald-400 font-mono flex flex-col">
       <div className="border-b border-emerald-900 px-4 py-3 flex items-center justify-between shrink-0">
-        <span className="text-emerald-300">mirror.exe</span>
+        <span className="text-emerald-300"></span>
         <ModeSwitcher mode={mode} setMode={setMode} />
       </div>
 

@@ -1,6 +1,13 @@
-import { useState, useRef, useEffect } from "react";
+import { useEffect, useRef, useState } from "react";
 
-const MODE_KEY = "-mode-v1";
+const GARDEN_PERSONA = `you are a thoughtful creative partner.
+reply in lowercase, stay concise, and focus on reflection, creation, and growth.
+when an image would help, append <<PORTRAIT: detailed visual prompt>> to the end of your reply.`;
+
+const DEFAULT_OPEN_PERSONA = `you are a helpful assistant.
+speak plainly, lowercase, no filler.`;
+
+const MODE_KEY = "garden-open-mode-v1";
 const GARDEN_STORAGE_KEY = "garden-session-v1";
 const OPEN_STORAGE_KEY = "open-session-v1";
 
@@ -23,31 +30,22 @@ function saveJSON(key, value) {
 
 function parseGardenReply(raw) {
   let text = raw;
-  let gate = null;
   let portraitPrompt = null;
-
-  
 
   const portraitMatch = text.match(/<<PORTRAIT:\s*([\s\S]*?)>>/);
   if (portraitMatch) {
     portraitPrompt = portraitMatch[1].trim();
     text = text.replace(portraitMatch[0], "").trim();
   } else {
-    // fallback: the model sometimes writes the closing line and the
-    // portrait description but forgets the <<PORTRAIT:>> wrapper.
-    // if there's substantial text after " heard enough",
-    // treat it as the prompt anyway.
     const closingMatch = text.match(/heard enough\.?\s*([\s\S]*)/i);
     if (closingMatch && closingMatch[1].replace(/[-\s]/g, "").length > 20) {
-            portraitPrompt = closingMatch[1].replace(/^[-\s]+/, "").trim();
+      portraitPrompt = closingMatch[1].replace(/^[-\s]+/, "").trim();
       text = "heard enough.";
     }
   }
 
   return { text, portraitPrompt };
-
 }
-
 
 async function callChat(system, messages) {
   const response = await fetch("/api/chat", {
@@ -55,6 +53,7 @@ async function callChat(system, messages) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ system, messages }),
   });
+
   if (!response.ok) {
     let detail = "";
     try {
@@ -65,8 +64,9 @@ async function callChat(system, messages) {
     }
     throw new Error(`api error ${response.status}: ${detail}`);
   }
+
   const data = await response.json();
-  const textBlock = data.content?.find((b) => b.type === "text");
+  const textBlock = data.content?.find((block) => block.type === "text");
   return textBlock?.text ?? "";
 }
 
@@ -91,7 +91,7 @@ function ModeSwitcher({ mode, setMode }) {
             : "border-emerald-900 text-emerald-700 hover:text-emerald-400"
         }`}
       >
-  
+        open chat
       </button>
     </div>
   );
@@ -103,7 +103,7 @@ function GardenMode() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-    const [portraitPrompt, setPortraitPrompt] = useState(saved?.portraitPrompt ?? null);
+  const [portraitPrompt, setPortraitPrompt] = useState(saved?.portraitPrompt ?? null);
   const [portraitUrl, setPortraitUrl] = useState(saved?.portraitUrl ?? null);
   const [portraitIndex, setPortraitIndex] = useState(saved?.portraitIndex ?? null);
   const [portraitLoading, setPortraitLoading] = useState(false);
@@ -112,7 +112,6 @@ function GardenMode() {
   useEffect(() => {
     saveJSON(GARDEN_STORAGE_KEY, { messages, portraitPrompt, portraitUrl, portraitIndex });
   }, [messages, portraitPrompt, portraitUrl, portraitIndex]);
-
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -148,6 +147,7 @@ function GardenMode() {
   async function send() {
     const text = input.trim();
     if (!text || loading) return;
+
     setError(null);
     setInput("");
     const nextMessages = [...messages, { role: "user", content: text }];
@@ -157,16 +157,16 @@ function GardenMode() {
     try {
       const raw = await callChat(
         GARDEN_PERSONA,
-        nextMessages.map((m) => ({ role: m.role, content: m.content }))
+        nextMessages.map((message) => ({ role: message.role, content: message.content }))
       );
-            const { text: cleanText, portraitPrompt: prompt } = parseGardenReply(raw);
+      const { text: cleanText, portraitPrompt: prompt } = parseGardenReply(raw);
       setMessages((prev) => [...prev, { role: "assistant", content: cleanText }]);
       if (prompt) {
         setPortraitIndex(nextMessages.length);
         setPortraitPrompt(prompt);
+        setPortraitUrl(null);
         generatePortrait(prompt);
       }
-
     } catch (e) {
       console.error("garden error:", e);
       setError((e && e.message) || String(e));
@@ -182,22 +182,44 @@ function GardenMode() {
     }
   }
 
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+  function restart() {
+    setMessages([]);
+    setError(null);
+    setPortraitPrompt(null);
+    setPortraitUrl(null);
+    setPortraitIndex(null);
+    try {
+      localStorage.removeItem(GARDEN_STORAGE_KEY);
+    } catch {
+      // ignore
+    }
+  }
+
+  return (
+    <>
+      <div className="border-b border-emerald-900 px-4 py-2 flex items-center justify-between shrink-0">
+        <button
+          onClick={restart}
+          className="text-xs text-emerald-700 hover:text-emerald-400 border border-emerald-900 hover:border-emerald-600 rounded px-2 py-1 transition-colors"
+        >
+          restart garden
+        </button>
+      </div>
+
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !loading && (
-          <div className="text-emerald-800 text-sm">
-            &gt; say something. i'm listening.
-          </div>
+          <div className="text-emerald-800 text-sm">&gt; say something. i&apos;m listening.</div>
         )}
 
-        {messages.map((m, i) => (
-          <div key={i}>
-            <div className={m.role === "user" ? "text-amber-500" : "text-emerald-300"}>
-              {m.role === "user" ? "> you" : "> "}
+        {messages.map((message, index) => (
+          <div key={index}>
+            <div className={message.role === "user" ? "text-amber-500" : "text-emerald-300"}>
+              {message.role === "user" ? "> you" : "> garden"}
             </div>
             <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">
-              {m.content}
+              {message.content}
             </div>
-            {i === portraitIndex && portraitPrompt && (
+            {index === portraitIndex && portraitPrompt && (
               <div className="border border-amber-900 rounded px-3 py-3 mt-4">
                 <div className="text-amber-500 text-xs mb-2">&gt; the portrait</div>
                 {portraitLoading && (
@@ -208,7 +230,7 @@ function GardenMode() {
                     <img src={portraitUrl} alt="portrait" className="w-full rounded border border-emerald-900" />
                     <a
                       href={portraitUrl}
-                      download={`-portrait-${Date.now()}.png`}
+                      download={`portrait-${Date.now()}.png`}
                       className="inline-block mt-2 text-xs text-amber-400 border border-amber-900 rounded px-2 py-1 hover:bg-amber-950/30"
                     >
                       save portrait
@@ -219,15 +241,15 @@ function GardenMode() {
             )}
           </div>
         ))}
+
         {loading && (
           <div>
-            <div className="text-emerald-300">&gt; </div>
+            <div className="text-emerald-300">&gt; garden</div>
             <div className="text-sm text-emerald-700 animate-pulse mt-0.5">thinking...</div>
           </div>
         )}
 
         {error && (
-
           <div className="text-red-400 text-xs border border-red-900 rounded px-3 py-2 whitespace-pre-wrap break-words">
             {error}
           </div>
@@ -278,6 +300,7 @@ function OpenMode() {
   async function send() {
     const text = input.trim();
     if (!text || loading) return;
+
     setError(null);
     setInput("");
     const nextMessages = [...messages, { role: "user", content: text }];
@@ -288,7 +311,7 @@ function OpenMode() {
       const safePersona = persona.trim().length > 0 ? persona : "you are a helpful assistant.";
       const reply = await callChat(
         safePersona,
-        nextMessages.map((m) => ({ role: m.role, content: m.content }))
+        nextMessages.map((message) => ({ role: message.role, content: message.content }))
       );
       setMessages((prev) => [...prev, { role: "assistant", content: reply || "[no reply]" }]);
     } catch (e) {
@@ -330,7 +353,7 @@ function OpenMode() {
 
       <div className="border-b border-emerald-900 shrink-0">
         <button
-          onClick={() => setPersonaOpen((o) => !o)}
+          onClick={() => setPersonaOpen((open) => !open)}
           className="w-full px-4 py-2 text-left text-xs text-amber-500/80 hover:text-amber-400 flex items-center justify-between"
         >
           <span>system message {messages.length > 0 && "(locked in for this scroll)"}</span>
@@ -355,23 +378,21 @@ function OpenMode() {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !loading && (
-          <div className="text-emerald-800 text-sm">
-            &gt; the list is empty. say something to start the scroll.
-          </div>
+          <div className="text-emerald-800 text-sm">&gt; the list is empty. say something to start the scroll.</div>
         )}
-        {messages.map((m, i) => (
-          <div key={i}>
-            <div className={m.role === "user" ? "text-amber-500" : "text-emerald-300"}>
-              {m.role === "user" ? "> you" : "> "}
+        {messages.map((message, index) => (
+          <div key={index}>
+            <div className={message.role === "user" ? "text-amber-500" : "text-emerald-300"}>
+              {message.role === "user" ? "> you" : "> open"}
             </div>
             <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">
-              {m.content}
+              {message.content}
             </div>
           </div>
         ))}
         {loading && (
           <div>
-            <div className="text-emerald-300">&gt; </div>
+            <div className="text-emerald-300">&gt; open</div>
             <div className="text-sm text-emerald-700 animate-pulse mt-0.5">thinking...</div>
           </div>
         )}
@@ -425,7 +446,7 @@ export default function App() {
   return (
     <div className="min-h-screen w-full bg-black text-emerald-400 font-mono flex flex-col">
       <div className="border-b border-emerald-900 px-4 py-3 flex items-center justify-between shrink-0">
-        <span className="text-emerald-300"></span>
+        <span className="text-emerald-300">garden chat</span>
         <ModeSwitcher mode={mode} setMode={setMode} />
       </div>
 

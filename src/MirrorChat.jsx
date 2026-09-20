@@ -10,6 +10,18 @@ speak plainly, lowercase, no filler.`;
 const MODE_KEY = "garden-open-mode-v1";
 const GARDEN_STORAGE_KEY = "garden-session-v1";
 const OPEN_STORAGE_KEY = "open-session-v1";
+const NEUNEX_HISTORY_KEY = "neunex-submission-history-v1";
+const DEFAULT_SUBMISSION_FORM = {
+  title: "",
+  worldId: "",
+  objectType: "billboard",
+  materialStyle: "portrait",
+  scale: "1",
+  positionX: "0",
+  positionY: "0",
+  positionZ: "0",
+  rotationY: "0",
+};
 
 function loadJSON(key) {
   try {
@@ -26,6 +38,24 @@ function saveJSON(key, value) {
   } catch {
     // ignore — storage full/unavailable
   }
+}
+
+function buildSubmissionTitle(prompt) {
+  const compact = (prompt || "").replace(/\s+/g, " ").trim();
+  if (!compact) return "garden portrait";
+  return compact.slice(0, 60);
+}
+
+function createSubmissionDraft(prompt) {
+  return {
+    ...DEFAULT_SUBMISSION_FORM,
+    title: buildSubmissionTitle(prompt),
+  };
+}
+
+function toNumber(value, fallback) {
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : fallback;
 }
 
 function parseGardenReply(raw) {
@@ -47,6 +77,17 @@ function parseGardenReply(raw) {
   return { text, portraitPrompt };
 }
 
+async function readError(response, prefix) {
+  let detail = "";
+  try {
+    const errBody = await response.json();
+    detail = errBody?.error?.message || errBody?.error || errBody?.hint || JSON.stringify(errBody);
+  } catch {
+    detail = await response.text();
+  }
+  throw new Error(`${prefix} ${response.status}: ${detail}`);
+}
+
 async function callChat(system, messages) {
   const response = await fetch("/api/chat", {
     method: "POST",
@@ -55,14 +96,7 @@ async function callChat(system, messages) {
   });
 
   if (!response.ok) {
-    let detail = "";
-    try {
-      const errBody = await response.json();
-      detail = errBody?.error?.message || JSON.stringify(errBody);
-    } catch {
-      detail = await response.text();
-    }
-    throw new Error(`api error ${response.status}: ${detail}`);
+    await readError(response, "api error");
   }
 
   const data = await response.json();
@@ -104,18 +138,39 @@ function GardenMode() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [portraitPrompt, setPortraitPrompt] = useState(saved?.portraitPrompt ?? null);
-  const [portraitUrl, setPortraitUrl] = useState(saved?.portraitUrl ?? null);
+  const [portraitAsset, setPortraitAsset] = useState(saved?.portraitAsset ?? null);
   const [portraitIndex, setPortraitIndex] = useState(saved?.portraitIndex ?? null);
   const [portraitLoading, setPortraitLoading] = useState(false);
+  const [submissionDraft, setSubmissionDraft] = useState(
+    saved?.submissionDraft ?? createSubmissionDraft(saved?.portraitPrompt)
+  );
+  const [submissionLoading, setSubmissionLoading] = useState(false);
+  const [submissionError, setSubmissionError] = useState(null);
+  const [submissionResult, setSubmissionResult] = useState(saved?.submissionResult ?? null);
+  const [submissionHistory, setSubmissionHistory] = useState(() => {
+    const history = loadJSON(NEUNEX_HISTORY_KEY);
+    return Array.isArray(history) ? history : [];
+  });
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    saveJSON(GARDEN_STORAGE_KEY, { messages, portraitPrompt, portraitUrl, portraitIndex });
-  }, [messages, portraitPrompt, portraitUrl, portraitIndex]);
+    saveJSON(GARDEN_STORAGE_KEY, {
+      messages,
+      portraitPrompt,
+      portraitAsset,
+      portraitIndex,
+      submissionDraft,
+      submissionResult,
+    });
+  }, [messages, portraitPrompt, portraitAsset, portraitIndex, submissionDraft, submissionResult]);
+
+  useEffect(() => {
+    saveJSON(NEUNEX_HISTORY_KEY, submissionHistory);
+  }, [submissionHistory]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, loading, portraitLoading]);
+  }, [messages, loading, portraitLoading, submissionLoading]);
 
   async function generatePortrait(prompt) {
     setPortraitLoading(true);
@@ -126,21 +181,68 @@ function GardenMode() {
         body: JSON.stringify({ prompt }),
       });
       if (!res.ok) {
-        let detail = "";
-        try {
-          const errBody = await res.json();
-          detail = errBody?.error || JSON.stringify(errBody);
-        } catch {
-          detail = await res.text();
-        }
-        throw new Error(`portrait api error ${res.status}: ${detail}`);
+        await readError(res, "portrait api error");
       }
       const data = await res.json();
-      setPortraitUrl(data.url);
+      setPortraitAsset(data.asset);
     } catch (e) {
       setError(`portrait failed: ${e.message}`);
     } finally {
       setPortraitLoading(false);
+    }
+  }
+
+  async function submitToNeunex() {
+    if (!portraitAsset || submissionLoading) return;
+
+    setSubmissionLoading(true);
+    setSubmissionError(null);
+    setSubmissionResult(null);
+
+    try {
+      const payload = {
+        asset: portraitAsset,
+        submission: {
+          title: submissionDraft.title.trim() || buildSubmissionTitle(portraitAsset.prompt),
+          worldId: submissionDraft.worldId.trim(),
+          objectType: submissionDraft.objectType,
+          materialStyle: submissionDraft.materialStyle.trim() || "portrait",
+          scale: toNumber(submissionDraft.scale, 1),
+          position: {
+            x: toNumber(submissionDraft.positionX, 0),
+            y: toNumber(submissionDraft.positionY, 0),
+            z: toNumber(submissionDraft.positionZ, 0),
+          },
+          rotation: {
+            x: 0,
+            y: toNumber(submissionDraft.rotationY, 0),
+            z: 0,
+          },
+        },
+        session: {
+          id: portraitAsset.id,
+          mode: "garden",
+          messageCount: messages.length,
+        },
+      };
+
+      const response = await fetch("/api/neunex-submit", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+
+      if (!response.ok) {
+        await readError(response, "neunex submit error");
+      }
+
+      const data = await response.json();
+      setSubmissionResult(data.submission);
+      setSubmissionHistory((prev) => [data.submission, ...prev].slice(0, 8));
+    } catch (e) {
+      setSubmissionError(e.message || String(e));
+    } finally {
+      setSubmissionLoading(false);
     }
   }
 
@@ -164,7 +266,10 @@ function GardenMode() {
       if (prompt) {
         setPortraitIndex(nextMessages.length);
         setPortraitPrompt(prompt);
-        setPortraitUrl(null);
+        setPortraitAsset(null);
+        setSubmissionDraft(createSubmissionDraft(prompt));
+        setSubmissionError(null);
+        setSubmissionResult(null);
         generatePortrait(prompt);
       }
     } catch (e) {
@@ -182,12 +287,19 @@ function GardenMode() {
     }
   }
 
+  function handleSubmissionFieldChange(field, value) {
+    setSubmissionDraft((prev) => ({ ...prev, [field]: value }));
+  }
+
   function restart() {
     setMessages([]);
     setError(null);
     setPortraitPrompt(null);
-    setPortraitUrl(null);
+    setPortraitAsset(null);
     setPortraitIndex(null);
+    setSubmissionDraft(createSubmissionDraft());
+    setSubmissionError(null);
+    setSubmissionResult(null);
     try {
       localStorage.removeItem(GARDEN_STORAGE_KEY);
     } catch {
@@ -211,41 +323,155 @@ function GardenMode() {
           <div className="text-emerald-800 text-sm">&gt; say something. i&apos;m listening.</div>
         )}
 
-        {messages.map((message, index) => (
-          <div key={index}>
-            <div className={message.role === "user" ? "text-amber-500" : "text-emerald-300"}>
-              {message.role === "user" ? "> you" : "> garden"}
-            </div>
-            <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">
-              {message.content}
-            </div>
-            {index === portraitIndex && portraitPrompt && (
-              <div className="border border-amber-900 rounded px-3 py-3 mt-4">
-                <div className="text-amber-500 text-xs mb-2">&gt; the portrait</div>
-                {portraitLoading && (
-                  <div className="text-sm text-emerald-700 animate-pulse">the portrait is forming...</div>
-                )}
-                {portraitUrl && (
-                  <>
-                    <img src={portraitUrl} alt="portrait" className="w-full rounded border border-emerald-900" />
-                    <a
-                      href={portraitUrl}
-                      download={`portrait-${Date.now()}.png`}
-                      className="inline-block mt-2 text-xs text-amber-400 border border-amber-900 rounded px-2 py-1 hover:bg-amber-950/30"
-                    >
-                      save portrait
-                    </a>
-                  </>
-                )}
+        {messages.map((message, index) => {
+          const showPortraitPanel = index === portraitIndex && (portraitLoading || portraitAsset || portraitPrompt);
+
+          return (
+            <div key={index}>
+              <div className={message.role === "user" ? "text-amber-500" : "text-emerald-300"}>
+                {message.role === "user" ? "> you" : "> garden"}
               </div>
-            )}
-          </div>
-        ))}
+              <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">
+                {message.content}
+              </div>
+              {showPortraitPanel && (
+                <div className="border border-amber-900 rounded px-3 py-3 mt-4 space-y-3">
+                  <div className="text-amber-500 text-xs">&gt; the portrait</div>
+                  {portraitLoading && (
+                    <div className="text-sm text-emerald-700 animate-pulse">the portrait is forming...</div>
+                  )}
+                  {portraitAsset && (
+                    <>
+                      <img
+                        src={portraitAsset.url}
+                        alt="portrait"
+                        className="w-full rounded border border-emerald-900"
+                      />
+                      <div className="text-[11px] text-emerald-700 break-words">
+                        asset {portraitAsset.id} · ready for neunex submission
+                      </div>
+                      <a
+                        href={portraitAsset.url}
+                        download={`portrait-${Date.now()}.png`}
+                        className="inline-block text-xs text-amber-400 border border-amber-900 rounded px-2 py-1 hover:bg-amber-950/30"
+                      >
+                        save portrait
+                      </a>
+
+                      <div className="border border-emerald-900 rounded p-3 space-y-3">
+                        <div className="text-xs text-amber-400">submit to neunex</div>
+                        <input
+                          value={submissionDraft.title}
+                          onChange={(e) => handleSubmissionFieldChange("title", e.target.value)}
+                          placeholder="title"
+                          className="w-full bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600"
+                        />
+                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                          <input
+                            value={submissionDraft.worldId}
+                            onChange={(e) => handleSubmissionFieldChange("worldId", e.target.value)}
+                            placeholder="world id"
+                            className="bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600"
+                          />
+                          <select
+                            value={submissionDraft.objectType}
+                            onChange={(e) => handleSubmissionFieldChange("objectType", e.target.value)}
+                            className="bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 focus:outline-none focus:border-emerald-600"
+                          >
+                            <option value="billboard">billboard</option>
+                            <option value="plane">plane</option>
+                            <option value="object">object</option>
+                            <option value="world">world</option>
+                          </select>
+                          <input
+                            value={submissionDraft.materialStyle}
+                            onChange={(e) => handleSubmissionFieldChange("materialStyle", e.target.value)}
+                            placeholder="material style"
+                            className="bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600"
+                          />
+                          <input
+                            value={submissionDraft.scale}
+                            onChange={(e) => handleSubmissionFieldChange("scale", e.target.value)}
+                            placeholder="scale"
+                            className="bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                          <input
+                            value={submissionDraft.positionX}
+                            onChange={(e) => handleSubmissionFieldChange("positionX", e.target.value)}
+                            placeholder="pos x"
+                            className="bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600"
+                          />
+                          <input
+                            value={submissionDraft.positionY}
+                            onChange={(e) => handleSubmissionFieldChange("positionY", e.target.value)}
+                            placeholder="pos y"
+                            className="bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600"
+                          />
+                          <input
+                            value={submissionDraft.positionZ}
+                            onChange={(e) => handleSubmissionFieldChange("positionZ", e.target.value)}
+                            placeholder="pos z"
+                            className="bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600"
+                          />
+                          <input
+                            value={submissionDraft.rotationY}
+                            onChange={(e) => handleSubmissionFieldChange("rotationY", e.target.value)}
+                            placeholder="rot y"
+                            className="bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600"
+                          />
+                        </div>
+                        <button
+                          onClick={submitToNeunex}
+                          disabled={submissionLoading}
+                          className="bg-amber-900/30 hover:bg-amber-800/40 disabled:opacity-30 border border-amber-700 text-amber-300 rounded px-4 py-2 text-sm transition-colors"
+                        >
+                          {submissionLoading ? "submitting..." : "submit to neunex"}
+                        </button>
+                        {submissionResult && (
+                          <div className="text-xs text-emerald-300 border border-emerald-900 rounded px-3 py-2 break-words">
+                            submitted {submissionResult.objectType}
+                            {submissionResult.worldId ? ` to ${submissionResult.worldId}` : " to neunex"}
+                            {submissionResult.id ? ` · id ${submissionResult.id}` : ""}
+                          </div>
+                        )}
+                        {submissionError && (
+                          <div className="text-xs text-red-400 border border-red-900 rounded px-3 py-2 whitespace-pre-wrap break-words">
+                            {submissionError}
+                          </div>
+                        )}
+                      </div>
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
 
         {loading && (
           <div>
             <div className="text-emerald-300">&gt; garden</div>
             <div className="text-sm text-emerald-700 animate-pulse mt-0.5">thinking...</div>
+          </div>
+        )}
+
+        {submissionHistory.length > 0 && (
+          <div className="border border-emerald-900 rounded px-3 py-3">
+            <div className="text-xs text-amber-500 mb-2">&gt; recent neunex submissions</div>
+            <div className="space-y-2">
+              {submissionHistory.map((entry) => (
+                <div key={`${entry.assetId}-${entry.submittedAt}`} className="text-xs text-emerald-200">
+                  <div>{entry.title || "untitled"}</div>
+                  <div className="text-emerald-700 break-words">
+                    {entry.objectType}
+                    {entry.worldId ? ` · ${entry.worldId}` : ""}
+                    {entry.id ? ` · ${entry.id}` : ""}
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 

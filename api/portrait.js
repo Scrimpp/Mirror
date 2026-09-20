@@ -1,5 +1,26 @@
+function createAssetRecord({ prompt, b64 }) {
+  return {
+    id: crypto.randomUUID(),
+    type: "image",
+    format: "png",
+    mimeType: "image/png",
+    prompt,
+    createdAt: new Date().toISOString(),
+    url: `data:image/png;base64,${b64}`,
+    metadata: {
+      provider: "openai",
+      model: "gpt-image-2",
+      source: "mirror",
+    },
+  };
+}
+
 export default async function handler(req, res) {
   if (req.method !== "POST") return res.status(405).json({ error: "Method not allowed" });
+
+  if (!process.env.OPENAI_API_KEY) {
+    return res.status(500).json({ error: "Missing OPENAI_API_KEY" });
+  }
 
   const { prompt } = req.body;
   if (!prompt) return res.status(400).json({ error: "Missing prompt" });
@@ -8,7 +29,7 @@ export default async function handler(req, res) {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`,
+      Authorization: "Bearer " + process.env.OPENAI_API_KEY,
     },
     body: JSON.stringify({
       model: "gpt-image-2",
@@ -26,5 +47,5 @@ export default async function handler(req, res) {
   const b64 = data?.data?.[0]?.b64_json;
   if (!b64) return res.status(500).json({ error: "No image returned" });
 
-  return res.status(200).json({ url: `data:image/png;base64,${b64}` });
+  return res.status(200).json({ asset: createAssetRecord({ prompt, b64 }) });
 }

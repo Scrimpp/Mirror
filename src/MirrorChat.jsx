@@ -8,8 +8,8 @@ const DEFAULT_OPEN_PERSONA = `you are a helpful assistant.
 speak plainly, lowercase, no filler.`;
 
 const MODE_KEY = "garden-open-mode-v1";
-const GARDEN_STORAGE_KEY = "garden-session-v2";
-const OPEN_STORAGE_KEY = "open-session-v1";
+const GARDEN_STORAGE_KEY = "garden-session-v3";
+const OPEN_STORAGE_KEY = "open-session-v2";
 const WORLD_TYPES = ["billboard", "portal", "totem", "window"];
 
 function loadJSON(key) {
@@ -77,6 +77,112 @@ function createWorldObject(asset, index) {
   };
 }
 
+function normalizeStoredMessage(message) {
+  if (!message) return null;
+  if (typeof message === "string") {
+    return { role: "assistant", text: message, attachments: [] };
+  }
+
+  return {
+    role: message.role,
+    text: message.text ?? (typeof message.content === "string" ? message.content : ""),
+    attachments: Array.isArray(message.attachments) ? message.attachments : [],
+  };
+}
+
+function normalizeStoredMessages(messages) {
+  if (!Array.isArray(messages)) return [];
+  return messages.map(normalizeStoredMessage).filter(Boolean);
+}
+
+function normalizeMessagesForApi(messages) {
+  return messages.map((message) => {
+    if (message.role !== "user") {
+      return { role: message.role, content: message.text || "" };
+    }
+
+    const text = (message.text || "").trim();
+    const blocks = [];
+
+    if (text) {
+      blocks.push({ type: "text", text });
+    }
+
+    for (const attachment of message.attachments || []) {
+      if (!attachment.base64 || !attachment.mediaType) continue;
+      blocks.push({
+        type: "image",
+        source: {
+          type: "base64",
+          media_type: attachment.mediaType,
+          data: attachment.base64,
+        },
+      });
+    }
+
+    return {
+      role: "user",
+      content: blocks.length === 1 && blocks[0].type === "text" ? blocks[0].text : blocks,
+    };
+  });
+}
+
+async function resizeImage(file) {
+  const dataUrl = await new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result);
+    reader.onerror = () => reject(new Error(`could not read ${file.name}`));
+    reader.readAsDataURL(file);
+  });
+
+  if (typeof dataUrl !== "string") {
+    throw new Error(`could not read ${file.name}`);
+  }
+
+  if (file.type === "image/gif") {
+    return {
+      id: crypto.randomUUID(),
+      name: file.name,
+      mediaType: file.type,
+      url: dataUrl,
+      base64: dataUrl.split(",")[1],
+    };
+  }
+
+  const image = await new Promise((resolve, reject) => {
+    const element = new Image();
+    element.onload = () => resolve(element);
+    element.onerror = () => reject(new Error(`could not load ${file.name}`));
+    element.src = dataUrl;
+  });
+
+  const maxSide = 1400;
+  const scale = Math.min(1, maxSide / Math.max(image.width, image.height));
+  const width = Math.max(1, Math.round(image.width * scale));
+  const height = Math.max(1, Math.round(image.height * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = width;
+  canvas.height = height;
+  const context = canvas.getContext("2d");
+
+  if (!context) {
+    throw new Error(`could not process ${file.name}`);
+  }
+
+  context.drawImage(image, 0, 0, width, height);
+
+  const outputType = file.type === "image/png" ? "image/png" : "image/jpeg";
+  const outputUrl = canvas.toDataURL(outputType, 0.86);
+
+  return {
+    id: crypto.randomUUID(),
+    name: file.name,
+    mediaType: outputType,
+    url: outputUrl,
+    base64: outputUrl.split(",")[1],
+  };
+}
+
 async function readError(response, prefix) {
   let detail = "";
   try {
@@ -92,7 +198,7 @@ async function callChat(system, messages) {
   const response = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ system, messages }),
+    body: JSON.stringify({ system, messages: normalizeMessagesForApi(messages) }),
   });
 
   if (!response.ok) {
@@ -106,6 +212,103 @@ async function callChat(system, messages) {
 
 function updateWorldObject(objects, id, updates) {
   return objects.map((object) => (object.id === id ? { ...object, ...updates } : object));
+}
+
+function MessageContent({ message }) {
+  return (
+    <div className="space-y-2">
+      {message.text ? (
+        <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">{message.text}</div>
+      ) : null}
+      {message.attachments?.length ? (
+        <div className="flex flex-wrap gap-2">
+          {message.attachments.map((attachment) => (
+            <div key={attachment.id} className="space-y-1">
+              <img
+                src={attachment.url}
+                alt={attachment.name || "attachment"}
+                className="h-20 w-20 rounded border border-emerald-900 object-cover"
+              />
+              <div className="max-w-20 truncate text-[10px] text-emerald-700">{attachment.name || "image"}</div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+function Composer({
+  input,
+  setInput,
+  onKeyDown,
+  onSend,
+  loading,
+  pendingImages,
+  onPickImages,
+  onRemovePendingImage,
+  placeholder,
+}) {
+  const fileInputRef = useRef(null);
+
+  return (
+    <div className="flex gap-2 items-end">
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        className="hidden"
+        onChange={onPickImages}
+      />
+      <div className="flex-1 space-y-2">
+        {pendingImages.length > 0 && (
+          <div className="flex flex-wrap gap-2">
+            {pendingImages.map((attachment) => (
+              <div key={attachment.id} className="relative">
+                <img
+                  src={attachment.url}
+                  alt={attachment.name || "attachment"}
+                  className="h-16 w-16 rounded border border-emerald-900 object-cover"
+                />
+                <button
+                  type="button"
+                  onClick={() => onRemovePendingImage(attachment.id)}
+                  className="absolute -right-2 -top-2 h-5 w-5 rounded-full border border-emerald-700 bg-black text-[10px] text-emerald-300"
+                >
+                  ×
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+        <div className="flex gap-2 items-end">
+          <button
+            type="button"
+            onClick={() => fileInputRef.current?.click()}
+            className="shrink-0 rounded border border-emerald-700 px-3 py-2 text-xs text-emerald-300 transition-colors hover:border-emerald-500 hover:text-emerald-100"
+          >
+            image
+          </button>
+          <textarea
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={onKeyDown}
+            rows={1}
+            placeholder={placeholder}
+            className="flex-1 bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 resize-none"
+          />
+          <button
+            onClick={onSend}
+            disabled={loading || (!input.trim() && pendingImages.length === 0)}
+            className="bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-30 border border-emerald-700 text-emerald-300 rounded px-4 py-2 text-sm transition-colors"
+          >
+            send
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function ModeSwitcher({ mode, setMode }) {
@@ -382,8 +585,9 @@ function ObjectEditor({ worldObjects, selectedObjectId, onSelect, onUpdate, onRe
 
 function GardenMode() {
   const saved = loadJSON(GARDEN_STORAGE_KEY);
-  const [messages, setMessages] = useState(saved?.messages ?? []);
+  const [messages, setMessages] = useState(normalizeStoredMessages(saved?.messages));
   const [input, setInput] = useState("");
+  const [pendingImages, setPendingImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const [portraitPrompt, setPortraitPrompt] = useState(saved?.portraitPrompt ?? null);
@@ -409,13 +613,28 @@ function GardenMode() {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, loading, portraitLoading]);
+  }, [messages, loading, portraitLoading, pendingImages.length]);
 
   useEffect(() => {
     if (!selectedWorldObjectId && worldObjects.length > 0) {
       setSelectedWorldObjectId(worldObjects[worldObjects.length - 1].id);
     }
   }, [selectedWorldObjectId, worldObjects]);
+
+  async function handlePickImages(event) {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    try {
+      const attachments = await Promise.all(files.map(resizeImage));
+      setPendingImages((prev) => [...prev, ...attachments]);
+      setError(null);
+    } catch (e) {
+      setError((e && e.message) || String(e));
+    } finally {
+      event.target.value = "";
+    }
+  }
 
   async function generatePortrait(prompt) {
     setPortraitLoading(true);
@@ -443,21 +662,24 @@ function GardenMode() {
 
   async function send() {
     const text = input.trim();
-    if (!text || loading) return;
+    if ((!text && pendingImages.length === 0) || loading) return;
 
     setError(null);
     setInput("");
-    const nextMessages = [...messages, { role: "user", content: text }];
+    const message = {
+      role: "user",
+      text,
+      attachments: pendingImages,
+    };
+    setPendingImages([]);
+    const nextMessages = [...messages, message];
     setMessages(nextMessages);
     setLoading(true);
 
     try {
-      const raw = await callChat(
-        GARDEN_PERSONA,
-        nextMessages.map((message) => ({ role: message.role, content: message.content }))
-      );
+      const raw = await callChat(GARDEN_PERSONA, nextMessages);
       const { text: cleanText, portraitPrompt: prompt } = parseGardenReply(raw);
-      setMessages((prev) => [...prev, { role: "assistant", content: cleanText }]);
+      setMessages((prev) => [...prev, { role: "assistant", text: cleanText, attachments: [] }]);
       if (prompt) {
         setPortraitIndex(nextMessages.length);
         setPortraitPrompt(prompt);
@@ -489,6 +711,7 @@ function GardenMode() {
 
   function restart() {
     setMessages([]);
+    setPendingImages([]);
     setError(null);
     setPortraitPrompt(null);
     setPortraitAsset(null);
@@ -528,9 +751,7 @@ function GardenMode() {
                 <div className={message.role === "user" ? "text-amber-500" : "text-emerald-300"}>
                   {message.role === "user" ? "> you" : "> garden"}
                 </div>
-                <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">
-                  {message.content}
-                </div>
+                <MessageContent message={message} />
                 {showPortraitPanel && (
                   <div className="mt-4 rounded border border-amber-900 px-3 py-3 space-y-2">
                     <div className="text-amber-500 text-xs">&gt; art births the world</div>
@@ -566,23 +787,17 @@ function GardenMode() {
         </div>
 
         <div className="border-t border-emerald-900 p-3 shrink-0">
-          <div className="flex gap-2 items-end">
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={handleKey}
-              rows={1}
-              placeholder="speak..."
-              className="flex-1 bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 resize-none"
-            />
-            <button
-              onClick={send}
-              disabled={loading || !input.trim()}
-              className="bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-30 border border-emerald-700 text-emerald-300 rounded px-4 py-2 text-sm transition-colors"
-            >
-              send
-            </button>
-          </div>
+          <Composer
+            input={input}
+            setInput={setInput}
+            onKeyDown={handleKey}
+            onSend={send}
+            loading={loading}
+            pendingImages={pendingImages}
+            onPickImages={handlePickImages}
+            onRemovePendingImage={(id) => setPendingImages((prev) => prev.filter((item) => item.id !== id))}
+            placeholder="speak or add inspo..."
+          />
         </div>
       </div>
 
@@ -613,9 +828,10 @@ function GardenMode() {
 function OpenMode() {
   const saved = loadJSON(OPEN_STORAGE_KEY);
   const [persona, setPersona] = useState(saved?.persona ?? DEFAULT_OPEN_PERSONA);
-  const [personaOpen, setPersonaOpen] = useState(!(saved?.messages?.length > 0));
-  const [messages, setMessages] = useState(saved?.messages ?? []);
+  const [personaOpen, setPersonaOpen] = useState(!(normalizeStoredMessages(saved?.messages).length > 0));
+  const [messages, setMessages] = useState(normalizeStoredMessages(saved?.messages));
   const [input, setInput] = useState("");
+  const [pendingImages, setPendingImages] = useState([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
   const scrollRef = useRef(null);
@@ -626,25 +842,43 @@ function OpenMode() {
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, loading]);
+  }, [messages, loading, pendingImages.length]);
+
+  async function handlePickImages(event) {
+    const files = Array.from(event.target.files || []);
+    if (files.length === 0) return;
+
+    try {
+      const attachments = await Promise.all(files.map(resizeImage));
+      setPendingImages((prev) => [...prev, ...attachments]);
+      setError(null);
+    } catch (e) {
+      setError((e && e.message) || String(e));
+    } finally {
+      event.target.value = "";
+    }
+  }
 
   async function send() {
     const text = input.trim();
-    if (!text || loading) return;
+    if ((!text && pendingImages.length === 0) || loading) return;
 
     setError(null);
     setInput("");
-    const nextMessages = [...messages, { role: "user", content: text }];
+    const message = {
+      role: "user",
+      text,
+      attachments: pendingImages,
+    };
+    setPendingImages([]);
+    const nextMessages = [...messages, message];
     setMessages(nextMessages);
     setLoading(true);
 
     try {
       const safePersona = persona.trim().length > 0 ? persona : "you are a helpful assistant.";
-      const reply = await callChat(
-        safePersona,
-        nextMessages.map((message) => ({ role: message.role, content: message.content }))
-      );
-      setMessages((prev) => [...prev, { role: "assistant", content: reply || "[no reply]" }]);
+      const reply = await callChat(safePersona, nextMessages);
+      setMessages((prev) => [...prev, { role: "assistant", text: reply || "[no reply]", attachments: [] }]);
     } catch (e) {
       console.error("open chat error:", e);
       setError((e && e.message) || String(e));
@@ -662,6 +896,7 @@ function OpenMode() {
 
   function resetConvo() {
     setMessages([]);
+    setPendingImages([]);
     setError(null);
     try {
       localStorage.removeItem(OPEN_STORAGE_KEY);
@@ -716,9 +951,7 @@ function OpenMode() {
             <div className={message.role === "user" ? "text-amber-500" : "text-emerald-300"}>
               {message.role === "user" ? "> you" : "> open"}
             </div>
-            <div className="whitespace-pre-wrap text-sm leading-relaxed mt-0.5 text-emerald-100">
-              {message.content}
-            </div>
+            <MessageContent message={message} />
           </div>
         ))}
         {loading && (
@@ -735,23 +968,17 @@ function OpenMode() {
       </div>
 
       <div className="border-t border-emerald-900 p-3 shrink-0">
-        <div className="flex gap-2 items-end">
-          <textarea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKey}
-            rows={1}
-            placeholder="type ..."
-            className="flex-1 bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-emerald-100 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 resize-none"
-          />
-          <button
-            onClick={send}
-            disabled={loading || !input.trim()}
-            className="bg-emerald-900/40 hover:bg-emerald-800/50 disabled:opacity-30 border border-emerald-700 text-emerald-300 rounded px-4 py-2 text-sm transition-colors"
-          >
-            send
-          </button>
-        </div>
+        <Composer
+          input={input}
+          setInput={setInput}
+          onKeyDown={handleKey}
+          onSend={send}
+          loading={loading}
+          pendingImages={pendingImages}
+          onPickImages={handlePickImages}
+          onRemovePendingImage={(id) => setPendingImages((prev) => prev.filter((item) => item.id !== id))}
+          placeholder="type or add inspo..."
+        />
       </div>
     </>
   );

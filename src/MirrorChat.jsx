@@ -182,7 +182,7 @@ function GardenMode() {
     }
   }
 
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+            <div ref={scrollRef} className="flex-1 min-h-0 max-h-[50vh] overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !loading && (
           <div className="text-emerald-800 text-sm">
             &gt; say something. i'm listening.
@@ -353,7 +353,7 @@ function OpenMode() {
         )}
       </div>
 
-      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+      <div ref={scrollRef} className="flex-1 min-h-0 max-h-[50vh] overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !loading && (
           <div className="text-emerald-800 text-sm">
             &gt; the list is empty. say something to start the scroll.
@@ -423,7 +423,7 @@ export default function App() {
   }, [mode]);
 
   return (
-    <div className="min-h-screen w-full bg-black text-emerald-400 font-mono flex flex-col">
+    <div className="h-screen overflow-hidden w-full bg-black text-emerald-400 font-mono flex flex-col">
       <div className="border-b border-emerald-900 px-4 py-3 flex items-center justify-between shrink-0">
         <span className="text-emerald-300"></span>
         <ModeSwitcher mode={mode} setMode={setMode} />

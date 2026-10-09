@@ -3,6 +3,7 @@ import { useState, useRef, useEffect } from "react";
 const MODE_KEY = "-mode-v1";
 const GARDEN_STORAGE_KEY = "garden-session-v1";
 const OPEN_STORAGE_KEY = "open-session-v1";
+const DEFAULT_OPEN_PERSONA = `you are warm, curious, a little playful. you speak simply and don't perform. you care about what's real. you find beauty in ordinary things. sunny but never fake.`;
 
 function loadJSON(key) {
   try {
@@ -91,7 +92,7 @@ function ModeSwitcher({ mode, setMode }) {
             : "border-emerald-900 text-emerald-700 hover:text-emerald-400"
         }`}
       >
-  
+        🌳
       </button>
     </div>
   );
@@ -259,8 +260,6 @@ function GardenMode() {
 
 function OpenMode() {
   const saved = loadJSON(OPEN_STORAGE_KEY);
-  const [persona, setPersona] = useState(saved?.persona ?? DEFAULT_OPEN_PERSONA);
-  const [personaOpen, setPersonaOpen] = useState(!(saved?.messages?.length > 0));
   const [messages, setMessages] = useState(saved?.messages ?? []);
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
@@ -268,8 +267,8 @@ function OpenMode() {
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    saveJSON(OPEN_STORAGE_KEY, { persona, messages });
-  }, [persona, messages]);
+    saveJSON(OPEN_STORAGE_KEY, { messages });
+  }, [messages]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -285,9 +284,8 @@ function OpenMode() {
     setLoading(true);
 
     try {
-      const safePersona = persona.trim().length > 0 ? persona : "you are a helpful assistant.";
       const reply = await callChat(
-        safePersona,
+        DEFAULT_OPEN_PERSONA,
         nextMessages.map((m) => ({ role: m.role, content: m.content }))
       );
       setMessages((prev) => [...prev, { role: "assistant", content: reply || "[no reply]" }]);
@@ -326,31 +324,6 @@ function OpenMode() {
         >
           clear scroll
         </button>
-      </div>
-
-      <div className="border-b border-emerald-900 shrink-0">
-        <button
-          onClick={() => setPersonaOpen((o) => !o)}
-          className="w-full px-4 py-2 text-left text-xs text-amber-500/80 hover:text-amber-400 flex items-center justify-between"
-        >
-          <span>system message {messages.length > 0 && "(locked in for this scroll)"}</span>
-          <span>{personaOpen ? "▾" : "▸"}</span>
-        </button>
-        {personaOpen && (
-          <div className="px-4 pb-3">
-            <textarea
-              value={persona}
-              onChange={(e) => setPersona(e.target.value)}
-              disabled={messages.length > 0}
-              rows={4}
-              placeholder="paste your document here — who it is, how it speaks"
-              className="w-full bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-amber-200 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 disabled:opacity-40 resize-none"
-            />
-            <p className="text-[11px] text-emerald-800 mt-1">
-              sent first, sent always. clear the scroll to edit it again.
-            </p>
-          </div>
-        )}
       </div>
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">

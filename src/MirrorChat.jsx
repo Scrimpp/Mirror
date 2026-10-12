@@ -101,7 +101,13 @@ function ModeSwitcher({ mode, setMode }) {
 
 function GardenMode() {
   const saved = loadJSON(GARDEN_STORAGE_KEY);
-  const [messages, setMessages] = useState(saved?.messages ?? []);
+  const [messages, setMessages] = useState(() =>
+    Array.isArray(saved?.messages)
+      ? saved.messages.filter(
+          (m) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant")
+        )
+      : []
+  );
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -242,7 +248,7 @@ function resizeImage(file, max = 800) {
 
 function OpenMode() {
   const saved = loadJSON(OPEN_STORAGE_KEY);
-  const [listings, setListings] = useState(saved?.listings ?? []);
+  const [listings, setListings] = useState(Array.isArray(saved?.listings) ? saved.listings : []);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [price, setPrice] = useState("");

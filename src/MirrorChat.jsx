@@ -3,6 +3,8 @@ import { useState, useRef, useEffect } from "react";
 const MODE_KEY = "-mode-v1";
 const GARDEN_STORAGE_KEY = "garden-session-v1";
 const OPEN_STORAGE_KEY = "open-session-v1";
+const GARDEN_PERSONA = `You are a concise, poetic garden oracle. Reply in short bursts. If you want to create a portrait prompt, end with <<PORTRAIT: ...>>.`;
+const DEFAULT_OPEN_PERSONA = "you are a helpful assistant.";
 
 function loadJSON(key) {
   try {
@@ -23,31 +25,22 @@ function saveJSON(key, value) {
 
 function parseGardenReply(raw) {
   let text = raw;
-  let gate = null;
   let portraitPrompt = null;
-
-  
 
   const portraitMatch = text.match(/<<PORTRAIT:\s*([\s\S]*?)>>/);
   if (portraitMatch) {
     portraitPrompt = portraitMatch[1].trim();
     text = text.replace(portraitMatch[0], "").trim();
   } else {
-    // fallback: the model sometimes writes the closing line and the
-    // portrait description but forgets the <<PORTRAIT:>> wrapper.
-    // if there's substantial text after " heard enough",
-    // treat it as the prompt anyway.
     const closingMatch = text.match(/heard enough\.?\s*([\s\S]*)/i);
     if (closingMatch && closingMatch[1].replace(/[-\s]/g, "").length > 20) {
-            portraitPrompt = closingMatch[1].replace(/^[-\s]+/, "").trim();
+      portraitPrompt = closingMatch[1].replace(/^[-\s]+/, "").trim();
       text = "heard enough.";
     }
   }
 
   return { text, portraitPrompt };
-
 }
-
 
 async function callChat(system, messages) {
   const response = await fetch("/api/chat", {
@@ -91,7 +84,7 @@ function ModeSwitcher({ mode, setMode }) {
             : "border-emerald-900 text-emerald-700 hover:text-emerald-400"
         }`}
       >
-  
+        the scroll
       </button>
     </div>
   );
@@ -103,7 +96,7 @@ function GardenMode() {
   const [input, setInput] = useState("");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-    const [portraitPrompt, setPortraitPrompt] = useState(saved?.portraitPrompt ?? null);
+  const [portraitPrompt, setPortraitPrompt] = useState(saved?.portraitPrompt ?? null);
   const [portraitUrl, setPortraitUrl] = useState(saved?.portraitUrl ?? null);
   const [portraitIndex, setPortraitIndex] = useState(saved?.portraitIndex ?? null);
   const [portraitLoading, setPortraitLoading] = useState(false);
@@ -112,7 +105,6 @@ function GardenMode() {
   useEffect(() => {
     saveJSON(GARDEN_STORAGE_KEY, { messages, portraitPrompt, portraitUrl, portraitIndex });
   }, [messages, portraitPrompt, portraitUrl, portraitIndex]);
-
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
@@ -159,14 +151,13 @@ function GardenMode() {
         GARDEN_PERSONA,
         nextMessages.map((m) => ({ role: m.role, content: m.content }))
       );
-            const { text: cleanText, portraitPrompt: prompt } = parseGardenReply(raw);
+      const { text: cleanText, portraitPrompt: prompt } = parseGardenReply(raw);
       setMessages((prev) => [...prev, { role: "assistant", content: cleanText }]);
       if (prompt) {
         setPortraitIndex(nextMessages.length);
         setPortraitPrompt(prompt);
         generatePortrait(prompt);
       }
-
     } catch (e) {
       console.error("garden error:", e);
       setError((e && e.message) || String(e));
@@ -182,11 +173,11 @@ function GardenMode() {
     }
   }
 
-            <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
+  return (
+    <>
+      <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !loading && (
-          <div className="text-emerald-800 text-sm">
-            &gt; say something. i'm listening.
-          </div>
+          <div className="text-emerald-800 text-sm">&gt; say something. i'm listening.</div>
         )}
 
         {messages.map((m, i) => (
@@ -208,7 +199,7 @@ function GardenMode() {
                     <img src={portraitUrl} alt="portrait" className="w-full rounded border border-emerald-900" />
                     <a
                       href={portraitUrl}
-                      download={`-portrait-${Date.now()}.png`}
+                      download={`garden-portrait-${Date.now()}.png`}
                       className="inline-block mt-2 text-xs text-amber-400 border border-amber-900 rounded px-2 py-1 hover:bg-amber-950/30"
                     >
                       save portrait
@@ -225,9 +216,7 @@ function GardenMode() {
             <div className="text-sm text-emerald-700 animate-pulse mt-0.5">thinking...</div>
           </div>
         )}
-
         {error && (
-
           <div className="text-red-400 text-xs border border-red-900 rounded px-3 py-2 whitespace-pre-wrap break-words">
             {error}
           </div>
@@ -285,7 +274,7 @@ function OpenMode() {
     setLoading(true);
 
     try {
-      const safePersona = persona.trim().length > 0 ? persona : "you are a helpful assistant.";
+      const safePersona = persona.trim().length > 0 ? persona : DEFAULT_OPEN_PERSONA;
       const reply = await callChat(
         safePersona,
         nextMessages.map((m) => ({ role: m.role, content: m.content }))
@@ -344,7 +333,7 @@ function OpenMode() {
               disabled={messages.length > 0}
               rows={4}
               placeholder="paste your document here — who it is, how it speaks"
-              className="w-full bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-amber-200 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 disabled:opacity-40 resize-none"
+              className="w-full bg-emerald-950/20 border border-emerald-900 rounded px-3 py-2 text-sm text-amber-200 placeholder-emerald-900 focus:outline-none focus:border-emerald-600 disabled:opacity-50"
             />
             <p className="text-[11px] text-emerald-800 mt-1">
               sent first, sent always. clear the scroll to edit it again.
@@ -355,9 +344,7 @@ function OpenMode() {
 
       <div ref={scrollRef} className="flex-1 overflow-y-auto px-4 py-4 space-y-4">
         {messages.length === 0 && !loading && (
-          <div className="text-emerald-800 text-sm">
-            &gt; the list is empty. say something to start the scroll.
-          </div>
+          <div className="text-emerald-800 text-sm">&gt; the list is empty. say something to start the scroll.</div>
         )}
         {messages.map((m, i) => (
           <div key={i}>
@@ -425,7 +412,7 @@ export default function App() {
   return (
     <div className="min-h-screen w-full bg-black text-emerald-400 font-mono flex flex-col">
       <div className="border-b border-emerald-900 px-4 py-3 flex items-center justify-between shrink-0">
-        <span className="text-emerald-300"></span>
+        <span className="text-emerald-300">mirror.exe</span>
         <ModeSwitcher mode={mode} setMode={setMode} />
       </div>
 

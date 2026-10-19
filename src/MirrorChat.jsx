@@ -131,15 +131,37 @@ function GardenMode() {
   const [portraitUrl, setPortraitUrl] = useState(saved?.portraitUrl ?? null);
   const [portraitIndex, setPortraitIndex] = useState(saved?.portraitIndex ?? null);
   const [portraitLoading, setPortraitLoading] = useState(false);
+
+  // --- 3D render (Meshy) state ---
+  const [modelStatus, setModelStatus] = useState(saved?.modelStatus ?? null); // null | "starting" | "PENDING" | "IN_PROGRESS" | "SUCCEEDED" | "FAILED"
+  const [modelProgress, setModelProgress] = useState(0);
+  const [modelUrl, setModelUrl] = useState(saved?.modelUrl ?? null);
+  const [modelError, setModelError] = useState(null);
+  const pollRef = useRef(null);
+
   const scrollRef = useRef(null);
 
   useEffect(() => {
-    saveJSON(GARDEN_STORAGE_KEY, { messages, portraitPrompt, portraitUrl, portraitIndex });
-  }, [messages, portraitPrompt, portraitUrl, portraitIndex]);
+    saveJSON(GARDEN_STORAGE_KEY, {
+      messages,
+      portraitPrompt,
+      portraitUrl,
+      portraitIndex,
+      modelStatus,
+      modelUrl,
+    });
+  }, [messages, portraitPrompt, portraitUrl, portraitIndex, modelStatus, modelUrl]);
 
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: "smooth" });
-  }, [messages, loading, portraitLoading]);
+  }, [messages, loading, portraitLoading, modelStatus]);
+
+  // stop polling if the component unmounts mid-render
+  useEffect(() => {
+    return () => {
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
+  }, []);
 
   async function generatePortrait(prompt) {
     setPortraitLoading(true);
@@ -165,6 +187,65 @@ function GardenMode() {
       setError(`portrait failed: ${e.message}`);
     } finally {
       setPortraitLoading(false);
+    }
+  }
+
+  async function startRender3D() {
+    if (!portraitUrl || modelStatus === "starting" || modelStatus === "PENDING" || modelStatus === "IN_PROGRESS") return;
+    setModelError(null);
+    setModelUrl(null);
+    setModelProgress(0);
+    setModelStatus("starting");
+
+    try {
+      const startRes = await fetch("/api/model3d", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ action: "start", imageUrl: portraitUrl }),
+      });
+      if (!startRes.ok) {
+        const errBody = await startRes.json().catch(() => ({}));
+        throw new Error(errBody?.error || `model3d start error ${startRes.status}`);
+      }
+      const { taskId } = await startRes.json();
+      if (!taskId) throw new Error("no task id returned");
+
+      setModelStatus("PENDING");
+
+      pollRef.current = setInterval(async () => {
+        try {
+          const statusRes = await fetch("/api/model3d", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ action: "status", taskId }),
+          });
+          if (!statusRes.ok) {
+            const errBody = await statusRes.json().catch(() => ({}));
+            throw new Error(errBody?.error || `model3d status error ${statusRes.status}`);
+          }
+          const data = await statusRes.json();
+          setModelStatus(data.status);
+          setModelProgress(data.progress ?? 0);
+
+          if (data.status === "SUCCEEDED") {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            setModelUrl(data.glbUrl);
+          } else if (data.status === "FAILED" || data.status === "CANCELED") {
+            clearInterval(pollRef.current);
+            pollRef.current = null;
+            setModelError(data.taskError?.message || "render failed");
+          }
+        } catch (e) {
+          clearInterval(pollRef.current);
+          pollRef.current = null;
+          setModelStatus("FAILED");
+          setModelError(e.message);
+        }
+      }, 4000);
+    } catch (e) {
+      setModelStatus("FAILED");
+      setModelError(e.message);
     }
   }
 
@@ -205,17 +286,25 @@ function GardenMode() {
   }
 
   function restart() {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = null;
     setMessages([]);
     setError(null);
     setPortraitPrompt(null);
     setPortraitIndex(null);
     setPortraitUrl(null);
+    setModelStatus(null);
+    setModelUrl(null);
+    setModelError(null);
+    setModelProgress(0);
     try {
       localStorage.removeItem(GARDEN_STORAGE_KEY);
     } catch {
       // ignore
     }
   }
+
+  const rendering = modelStatus === "starting" || modelStatus === "PENDING" || modelStatus === "IN_PROGRESS";
 
   return (
     <>
@@ -251,13 +340,51 @@ function GardenMode() {
                 {portraitUrl && (
                   <>
                     <img src={portraitUrl} alt="portrait" className="w-full rounded border border-emerald-900" />
-                    <a
-                      href={portraitUrl}
-                      download={`garden-portrait-${Date.now()}.png`}
-                      className="inline-block mt-2 text-xs text-amber-400 border border-amber-900 rounded px-2 py-1 hover:bg-amber-950/30"
-                    >
-                      save portrait
-                    </a>
+                    <div className="flex gap-2 flex-wrap mt-2">
+                      <a
+                        href={portraitUrl}
+                        download={`garden-portrait-${Date.now()}.png`}
+                        className="inline-block text-xs text-amber-400 border border-amber-900 rounded px-2 py-1 hover:bg-amber-950/30"
+                      >
+                        save portrait
+                      </a>
+                      <button
+                        onClick={startRender3D}
+                        disabled={rendering}
+                        className="inline-block text-xs text-amber-400 border border-amber-900 rounded px-2 py-1 hover:bg-amber-950/30 disabled:opacity-40"
+                      >
+                        {rendering
+                          ? `rendering in 3d... ${modelProgress ? `${modelProgress}%` : ""}`
+                          : modelUrl
+                          ? "render again in 3d"
+                          : "render in 3d"}
+                      </button>
+                    </div>
+
+                    {modelError && (
+                      <div className="text-red-400 text-xs border border-red-900 rounded px-3 py-2 mt-2 whitespace-pre-wrap break-words">
+                        3d render failed: {modelError}
+                      </div>
+                    )}
+
+                    {modelUrl && (
+                      <div className="mt-3 border border-amber-900 rounded overflow-hidden">
+                        <model-viewer
+                          src={modelUrl}
+                          camera-controls="true"
+                          auto-rotate="true"
+                          shadow-intensity="1"
+                          style={{ width: "100%", height: "320px", backgroundColor: "#000" }}
+                        ></model-viewer>
+                        <a
+                          href={modelUrl}
+                          download={`garden-model-${Date.now()}.glb`}
+                          className="block text-xs text-amber-400 px-2 py-2 hover:bg-amber-950/30 border-t border-amber-900"
+                        >
+                          download .glb
+                        </a>
+                      </div>
+                    )}
                   </>
                 )}
               </div>

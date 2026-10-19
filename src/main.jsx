@@ -1,4 +1,3 @@
-```jsx
 import React from "react";
 import ReactDOM from "react-dom/client";
 import MirrorChat from "./MirrorChat.jsx";
@@ -9,4 +8,3 @@ ReactDOM.createRoot(document.getElementById("root")).render(
     <MirrorChat />
   </React.StrictMode>
 );
-```
